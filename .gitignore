@@ -1,0 +1,17 @@
+build/
+.vscode/
+.idea/
+.DS_Store
+*.o
+*.a
+*.so
+*.dylib
+*.dll
+*.exe
+bin/
+logs/
+benchmark_results/
+compile_commands.json
+.cache/
+test_results/
+core
