@@ -1,17 +1,18 @@
+#include <gtest/gtest.h>
 #include "server/http_server.hpp"
-#include <iostream>
+#include "utils/logger.hpp"
 #include <thread>
 #include <chrono>
 #include <sys/socket.h>
 #include <arpa/inet.h>
 #include <unistd.h>
 #include <cstring>
-#include <cassert>
 
-void test_connection() {
+TEST(ServerIntegrationTest, ConnectionTest) {
     http::utils::Config config;
     config.port = 8090;
-    http::server::HttpServer server(config);
+    http::utils::Logger logger;
+    http::server::HttpServer server(config, logger);
     
     std::thread t([&server]() {
         server.start();
@@ -26,7 +27,7 @@ void test_connection() {
     inet_pton(AF_INET, "127.0.0.1", &serv_addr.sin_addr);
     
     int connect_res = connect(sock, (struct sockaddr *)&serv_addr, sizeof(serv_addr));
-    assert(connect_res >= 0);
+    ASSERT_GE(connect_res, 0);
     
     std::string req = "GET / HTTP/1.1\r\n\r\n";
     send(sock, req.c_str(), req.length(), 0);
@@ -34,16 +35,10 @@ void test_connection() {
     char buffer[1024] = {0};
     read(sock, buffer, 1024);
     std::string res(buffer);
-    assert(res.find("404 Not Found") != std::string::npos); // Default behavior
+    // Since we didn't add route for /, it should be 404
+    EXPECT_NE(res.find("404 Not Found"), std::string::npos);
     
     close(sock);
     server.stop();
     t.join();
-    
-    std::cout << "test_connection passed" << std::endl;
-}
-
-int main() {
-    test_connection();
-    return 0;
 }

@@ -1,41 +1,55 @@
+#include <gtest/gtest.h>
 #include "server/router.hpp"
-#include <cassert>
-#include <iostream>
 
-void test_simple_route() {
-    http::server::Router router;
-    bool called = false;
+class RouterTest : public ::testing::Test {
+protected:
+    void SetUp() override {
+        router_.get("/test", [](const http::server::Request& req) {
+            http::server::Response res;
+            res.body = "OK";
+            res.status_code = 200;
+            return res;
+        });
+        
+        router_.get("/users/:id", [](const http::server::Request& req) {
+            http::server::Response res;
+            if (req.path_params.count("id")) {
+                res.body = "User " + req.path_params.at("id");
+            }
+            res.status_code = 200;
+            return res;
+        });
+    }
     
-    router.add_route("GET", "/", [&](const http::server::Request&, http::server::Response&) {
-        called = true;
-    });
-    
+    http::server::Router router_;
+};
+
+TEST_F(RouterTest, SimpleRoute) {
     http::server::Request req;
     req.method = "GET";
-    req.path = "/";
-    http::server::Response res;
+    req.path = "/test";
     
-    router.route(req, res);
-    assert(called);
-    
-    std::cout << "test_simple_route passed" << std::endl;
+    auto res = router_.route(req);
+    ASSERT_TRUE(res.has_value());
+    EXPECT_EQ(res->status_code, 200);
+    EXPECT_EQ(res->body, "OK");
 }
 
-void test_not_found() {
-    http::server::Router router;
+TEST_F(RouterTest, PathParams) {
     http::server::Request req;
     req.method = "GET";
-    req.path = "/unknown";
-    http::server::Response res;
+    req.path = "/users/123";
     
-    router.route(req, res);
-    assert(res.status_code == 404);
-    
-    std::cout << "test_not_found passed" << std::endl;
+    auto res = router_.route(req);
+    ASSERT_TRUE(res.has_value());
+    EXPECT_EQ(res->body, "User 123");
 }
 
-int main() {
-    test_simple_route();
-    test_not_found();
-    return 0;
+TEST_F(RouterTest, RouteNotFound) {
+    http::server::Request req;
+    req.method = "GET";
+    req.path = "/nonexistent";
+    
+    auto res = router_.route(req);
+    EXPECT_FALSE(res.has_value());
 }

@@ -1,12 +1,14 @@
+#include <gtest/gtest.h>
 #include "server/http_server.hpp"
+#include "utils/logger.hpp"
 #include <thread>
 #include <chrono>
-#include <iostream>
 
-void test_server_start_stop() {
+TEST(ServerIntegrationTest, StartStop) {
     http::utils::Config config;
     config.port = 8089;
-    http::server::HttpServer server(config);
+    http::utils::Logger logger;
+    http::server::HttpServer server(config, logger);
     
     std::thread t([&server]() {
         server.start();
@@ -16,10 +18,5 @@ void test_server_start_stop() {
     server.stop();
     t.join();
     
-    std::cout << "test_server_start_stop passed" << std::endl;
-}
-
-int main() {
-    test_server_start_stop();
-    return 0;
+    SUCCEED();
 }

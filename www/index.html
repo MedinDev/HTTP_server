@@ -1,10 +1,111 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
-    <title>HTTP Server</title>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>High-Performance HTTP Server Dashboard</title>
+    <link rel="stylesheet" href="css/style.css">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Fira+Code&display=swap" rel="stylesheet">
 </head>
 <body>
-    <h1>Welcome to the C++ HTTP Server!</h1>
-    <p>This page is served statically.</p>
+    <div class="container">
+        <header>
+            <div class="logo">
+                <h1>HTTP Server</h1>
+            </div>
+            <div class="status-badge online">
+                <span class="dot"></span> Server Online
+            </div>
+        </header>
+
+        <main>
+            <!-- Real-time Metrics Section -->
+            <section class="metrics-grid">
+                <div class="card metric-card">
+                    <h3>Requests / Sec</h3>
+                    <div class="value" id="rps-value">0</div>
+                    <div class="label">Real-time throughput</div>
+                </div>
+                <div class="card metric-card">
+                    <h3>Total Requests</h3>
+                    <div class="value" id="total-requests">0</div>
+                    <div class="label">Since startup</div>
+                </div>
+                <div class="card metric-card">
+                    <h3>Active Connections</h3>
+                    <div class="value" id="active-connections">0</div>
+                    <div class="label">Current concurrency</div>
+                </div>
+                <div class="card metric-card">
+                    <h3>Data Transferred</h3>
+                    <div class="value" id="bytes-sent">0 MB</div>
+                    <div class="label">Total outbound traffic</div>
+                </div>
+            </section>
+
+            <div class="dashboard-split">
+                <!-- API Tester Section -->
+                <section class="card api-tester">
+                    <h2>API Tester</h2>
+                    <div class="control-group">
+                        <select id="endpoint-select">
+                            <option value="/api/hello">GET /api/hello (Simple JSON)</option>
+                            <option value="/api/users">GET /api/users (Mock Data)</option>
+                            <option value="/api/metrics">GET /api/metrics (Server Stats)</option>
+                            <option value="/static/index.html">GET /static/index.html (File)</option>
+                        </select>
+                        <button id="send-btn" class="btn primary">Send Request</button>
+                    </div>
+                    
+                    <div class="response-area">
+                        <div class="response-header">
+                            <span id="response-status">Status: -</span>
+                            <span id="response-time">Latency: - ms</span>
+                        </div>
+                        <pre><code id="response-body">// Response will appear here...</code></pre>
+                    </div>
+                </section>
+
+                <!-- Load Test Section -->
+                <section class="card load-tester">
+                    <h2>Mini Load Test</h2>
+                    <p>Run a quick browser-based benchmark (100 sequential requests) to test latency.</p>
+                    
+                    <div class="control-group">
+                        <button id="benchmark-btn" class="btn danger">Run Benchmark (100 reqs)</button>
+                    </div>
+
+                    <div class="benchmark-results" id="benchmark-results" style="display: none;">
+                        <div class="progress-bar">
+                            <div class="fill" id="benchmark-progress" style="width: 0%"></div>
+                        </div>
+                        <div class="stats-grid">
+                            <div class="stat">
+                                <span class="label">Avg Latency</span>
+                                <span class="val" id="bench-avg">0 ms</span>
+                            </div>
+                            <div class="stat">
+                                <span class="label">Min Latency</span>
+                                <span class="val" id="bench-min">0 ms</span>
+                            </div>
+                            <div class="stat">
+                                <span class="label">Max Latency</span>
+                                <span class="val" id="bench-max">0 ms</span>
+                            </div>
+                            <div class="stat">
+                                <span class="label">Total Time</span>
+                                <span class="val" id="bench-total">0 ms</span>
+                            </div>
+                        </div>
+                    </div>
+                </section>
+            </div>
+        </main>
+        
+        <footer>
+            <p>Powered by C++20, Boost.Asio & Custom Thread Pool</p>
+        </footer>
+    </div>
+    <script src="js/app.js"></script>
 </body>
 </html>

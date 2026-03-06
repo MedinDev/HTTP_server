@@ -1,28 +1,31 @@
 # Unit Tests
-add_executable(test_request unit/test_request.cpp)
-target_link_libraries(test_request PRIVATE server_lib)
-add_test(NAME test_request COMMAND test_request)
 
-add_executable(test_response unit/test_response.cpp)
-target_link_libraries(test_response PRIVATE server_lib)
-add_test(NAME test_response COMMAND test_response)
+# Use system installed GTest via Brew
+find_package(GTest REQUIRED)
 
-add_executable(test_router unit/test_router.cpp)
-target_link_libraries(test_router PRIVATE server_lib)
-add_test(NAME test_router COMMAND test_router)
+enable_testing()
 
-add_executable(test_logger unit/test_logger.cpp)
-target_link_libraries(test_logger PRIVATE server_lib)
-add_test(NAME test_logger COMMAND test_logger)
+# Consolidated Unit Tests
+add_executable(unit_tests
+    unit/test_request.cpp
+    unit/test_response.cpp
+    unit/test_router.cpp
+    unit/test_logger.cpp
+)
+target_link_libraries(unit_tests PRIVATE server_lib GTest::gtest_main)
+add_test(NAME unit_tests COMMAND unit_tests)
 
-# Integration Tests
-add_executable(test_server integration/test_server.cpp)
-target_link_libraries(test_server PRIVATE server_lib)
-add_test(NAME test_server COMMAND test_server)
+# Consolidated Integration Tests
+add_executable(integration_tests
+    integration/test_server.cpp
+    integration/test_connections.cpp
+)
+target_link_libraries(integration_tests PRIVATE server_lib GTest::gtest_main)
+add_test(NAME integration_tests COMMAND integration_tests)
 
-add_executable(test_connections integration/test_connections.cpp)
-target_link_libraries(test_connections PRIVATE server_lib)
-add_test(NAME test_connections COMMAND test_connections)
+# Keep individual tests for granular running if needed (optional, but good for development)
+# But to avoid target name conflicts, I'll remove them or rename them.
+# Given the user request, I'll just stick to the consolidated ones to keep it clean and matching the README.
 
 # Benchmarks
 add_executable(benchmark_server benchmarks/benchmark_server.cpp)

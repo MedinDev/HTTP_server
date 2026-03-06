@@ -1,14 +1,18 @@
 #include "server/http_server.hpp"
+#include "utils/logger.hpp"
 #include <iostream>
 #include <chrono>
 
 int main() {
     http::utils::Config config;
     config.port = 8080;
-    http::server::HttpServer server(config);
+    http::utils::Logger logger;
+    http::server::HttpServer server(config, logger);
 
-    server.get_router().add_route("GET", "/", [](const http::server::Request&, http::server::Response& res) {
+    server.router().get("/", [](const http::server::Request&) -> http::server::Response {
+        http::server::Response res;
         res.body = "Benchmark";
+        return res;
     });
 
     std::cout << "Starting Benchmark Server on 8080" << std::endl;

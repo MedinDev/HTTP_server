@@ -1,37 +1,17 @@
 #include "server/http_server.hpp"
-#include "server/connection.hpp"
-#include "server/request.hpp"
-#include "server/response.hpp"
-#include "utils/logger.hpp"
-#include <sys/socket.h>
-#include <unistd.h>
-#include <cstring>
-#include <stdexcept>
 #include <iostream>
 
 namespace http {
 namespace server {
 
-HttpServer::HttpServer(const utils::Config& config)
-    : config_(config), thread_pool_(config.thread_pool_size), running_(false)
+HttpServer::HttpServer(const utils::Config& config, utils::Logger& logger)
+    : io_context_(),
+      acceptor_(io_context_, boost::asio::ip::tcp::endpoint(boost::asio::ip::tcp::v4(), config.port)),
+      thread_pool_(config.thread_pool_size),
+      logger_(logger),
+      running_(false)
 {
-    server_socket_ = socket(AF_INET, SOCK_STREAM, 0);
-    if (server_socket_ == -1) {
-        throw std::runtime_error("Failed to create socket");
-    }
-
-    int opt = 1;
-    if (setsockopt(server_socket_, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt)) < 0) {
-        throw std::runtime_error("setsockopt failed");
-    }
-
-    address_.sin_family = AF_INET;
-    address_.sin_addr.s_addr = INADDR_ANY;
-    address_.sin_port = htons(config.port);
-
-    if (bind(server_socket_, (struct sockaddr*)&address_, sizeof(address_)) < 0) {
-        throw std::runtime_error("Bind failed");
-    }
+    logger_.log(utils::LogLevel::INFO, "Initializing HttpServer on port " + std::to_string(config.port));
 }
 
 HttpServer::~HttpServer() {
@@ -39,56 +19,50 @@ HttpServer::~HttpServer() {
 }
 
 void HttpServer::start() {
-    if (listen(server_socket_, 3) < 0) {
-        throw std::runtime_error("Listen failed");
-    }
-
+    if (running_) return;
     running_ = true;
-    utils::Logger::log(utils::LogLevel::INFO, "Server started on port " + std::to_string(config_.port));
+    start_time_ = std::chrono::steady_clock::now();
+    
+    logger_.log(utils::LogLevel::INFO, "Starting server...");
     
     accept_connections();
+    
+    // Run io_context in the main thread (blocking)
+    io_context_.run();
 }
 
 void HttpServer::stop() {
+    if (!running_) return;
     running_ = false;
-    if (server_socket_ != -1) {
-        close(server_socket_);
-        server_socket_ = -1;
-    }
+    logger_.log(utils::LogLevel::INFO, "Stopping server...");
+    
+    acceptor_.close();
+    io_context_.stop();
 }
 
 void HttpServer::accept_connections() {
-    int addrlen = sizeof(address_);
-    while (running_) {
-        int new_socket = accept(server_socket_, (struct sockaddr*)&address_, (socklen_t*)&addrlen);
-        if (new_socket < 0) {
-            if (running_) {
-                utils::Logger::log(utils::LogLevel::ERROR, "Accept failed");
-            }
-            continue;
-        }
-        
-        thread_pool_.enqueue([this, new_socket] {
-            this->handle_client(new_socket);
-        });
-    }
-}
-
-void HttpServer::handle_client(int client_socket) {
-    Connection conn(client_socket);
-    char buffer[1024] = {0};
-    int valread = read(client_socket, buffer, 1024);
+    auto connection = std::make_shared<Connection>(
+        boost::asio::ip::tcp::socket(io_context_), router_, thread_pool_, metrics_
+    );
     
-    if (valread > 0) {
-        Request req = Request::parse(std::string(buffer, valread));
-        Response res;
-        
-        router_.route(req, res);
-        
-        std::string response_str = res.to_string();
-        send(client_socket, response_str.c_str(), response_str.length(), 0);
+    acceptor_.async_accept(connection->socket(),
+        [this, connection](const boost::system::error_code& error) {
+            handle_accept(connection, error);
+        });
+}
+
+void HttpServer::handle_accept(std::shared_ptr<Connection> connection, const boost::system::error_code& error) {
+    if (!error) {
+        metrics_.active_connections++;
+        connection->start();
+    } else {
+        logger_.log(utils::LogLevel::ERROR, "Accept error: " + error.message());
+    }
+    
+    if (running_) {
+        accept_connections();
     }
 }
 
-}
-}
+} // namespace server
+} // namespace http
