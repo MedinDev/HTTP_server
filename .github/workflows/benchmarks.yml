@@ -1,28 +1,26 @@
 name: Benchmarks
 
-on: [push, pull_request]
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
 
 jobs:
   benchmark:
     runs-on: ubuntu-latest
-    
     steps:
-    - uses: actions/checkout@v2
-    
-    - name: Install dependencies
-      run: sudo apt-get install -y apache2-utils
-      
-    - name: Configure CMake
-      run: cmake -B build -DCMAKE_BUILD_TYPE=Release
-      
-    - name: Build
-      run: cmake --build build --config Release
-      
-    - name: Run Server
-      run: ./build/http_server &
-      
-    - name: Wait for server
-      run: sleep 5
-      
-    - name: Run Benchmark
-      run: ab -n 10000 -c 100 http://localhost:8080/
+      - uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: sudo apt-get update && sudo apt-get install -y libboost-dev apache2-utils
+
+      - name: Build
+        run: cmake -B build && cmake --build build -j
+
+      - name: Start server
+        run: |
+          ./build/bin/HighPerformanceHttpServer -c config/default.conf &
+          for i in $(seq 1 20); do curl -sf http://127.0.0.1:8080/api/hello && break; sleep 0.5; done
+
+      - name: Run benchmark
+        run: ab -n 20000 -c 100 http://127.0.0.1:8080/api/hello

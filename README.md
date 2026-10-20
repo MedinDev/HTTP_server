@@ -1,287 +1,166 @@
-# ⚡ C++20 High-Performance HTTP Server
+# C++20 HTTP Server — Boost.Asio, Thread Pool & Live Metrics Dashboard
 
-🔥 High-performance asynchronous HTTP server in C++20 with 50k+ req/sec throughput. Features custom thread pooling, zero-copy I/O, real-time monitoring dashboard, and comprehensive benchmarking against nginx/Apache. Perfect for learning systems programming and performance optimization.
+[![CI](https://github.com/MedinDev/HTTP_server/actions/workflows/ci.yml/badge.svg)](https://github.com/MedinDev/HTTP_server/actions/workflows/ci.yml)
+[![C++20](https://img.shields.io/badge/C%2B%2B-20-blue.svg)](https://en.cppreference.com/w/cpp/20)
+[![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 
-A production-grade, asynchronous HTTP/1.1 server built from scratch in modern C++20. This project demonstrates advanced systems programming concepts, performance optimization techniques, and software architecture best practices.
+An asynchronous HTTP/1.1 server written from scratch in modern C++20. It uses Boost.Asio for non-blocking networking, a custom thread pool for request handling, a regex-based router with path parameters and middleware, static file serving, and a built-in web dashboard showing live metrics.
 
-## 📈 Sample API Performance
+**~24,000 requests/second with 1 ms p95 latency** on an Apple M1 Pro (see [Benchmarks](#benchmarks)).
+
+![Live metrics dashboard](asset/dashboard.png)
+
+## Features
+
+- **Async I/O** — Boost.Asio `io_context` drives non-blocking accepts, reads and writes
+- **Thread pool** — request handling runs on a fixed pool of worker threads (`std::packaged_task` + condition variable), keeping the I/O thread free
+- **Router** — `GET`/`POST`/`PUT`/`DELETE` routes, path parameters (`/users/:id`) and a middleware chain
+- **Static files** — serves a web root, with path-traversal protection
+- **Live metrics** — atomic counters for requests, connections and bytes sent, exposed at `/api/metrics`
+- **Web dashboard** — real-time metrics, an API tester and an in-browser mini load test
+- **Tested** — GoogleTest unit and integration suites, run in CI on every push
+
+## Quick start
+
+Requirements: CMake 3.20+, a C++20 compiler, Boost, and GoogleTest (only for tests).
+
+```bash
+# macOS
+brew install cmake boost googletest
+
+# Ubuntu
+sudo apt-get install -y cmake libboost-dev libgtest-dev
+```
+
+```bash
+git clone https://github.com/MedinDev/HTTP_server.git
+cd HTTP_server
+cmake -B build -DBUILD_TESTING=ON
+cmake --build build -j
+./build/bin/HighPerformanceHttpServer -c config/default.conf
+```
+
+Then open <http://localhost:8080/> for the dashboard, or call the API directly:
+
+```bash
+curl localhost:8080/api/hello
+curl localhost:8080/users/42
+curl localhost:8080/api/metrics
+```
+
+Run the tests:
+
+```bash
+ctest --test-dir build --output-on-failure
+```
+
+## Usage
 
 ```cpp
-// Your route handler
-server.router().get("/api/users", [](const Request& req) {
-    return Response::json({{"users", fetch_users()}});
+using namespace http::server;
+
+HttpServer server(config, logger);
+
+server.router().get("/api/hello", [](const Request&) {
+    return Response::json(R"({"message": "Hello, World!"})");
 });
+
+server.router().get("/users/:id", [](const Request& req) {
+    return Response::json(R"({"user_id": ")" + req.path_params.at("id") + R"("})");
+});
+
+server.router().serve_static("/", "www");
+server.start();
 ```
 
-```text
-// Benchmark results
-ab -n 100000 -c 100 http://localhost:8080/api/users
+Configuration lives in [`config/default.conf`](config/default.conf):
 
-> Requests per second:    48521.34 [#/sec] (mean)
-> Time per request:       2.061 [ms] (mean)
-> Transfer rate:          12450.56 [Kbytes/sec] received
+```ini
+port=8080
+thread_pool_size=4
+static_dir=www
+log_level=INFO
 ```
 
-## 🎯 Key Technical Achievements
+## Architecture
 
-- **50,000+ requests/second** on commodity hardware
-- **< 2ms p95 latency** under sustained load
-- **Real-time Dashboard** for metrics and testing
-- **Zero-copy I/O** for static file serving
-- **Lock-free connection pooling** minimizing contention
-- **CPU cache-line aligned data structures**
-- **Adaptive thread pool** with work-stealing
-
-## 🛠️ Technical Stack
-
-- **Language**: C++20 (concepts, coroutines, ranges)
-- **Networking**: Boost.Asio (proactor pattern)
-- **Testing**: GoogleTest, GoogleBenchmark
-- **Profiling**: Valgrind, gprof, perf, heaptrack
-- **CI/CD**: GitHub Actions (build, test, benchmark)
-- **Documentation**: Doxygen, PlantUML diagrams
-
-## 🏗️ Architecture Deep Dive
-
-### System Architecture
-```mermaid
-classDiagram
-    class HttpServer {
-        +start()
-        +stop()
-        -acceptor_: tcp::acceptor
-        -router_: Router
-        -thread_pool_: ThreadPool
-        -metrics_: Metrics
-    }
-    class Connection {
-        +start()
-        -socket_: tcp::socket
-        -request_: Request
-        -response_: Response
-        -do_read()
-        -process_request()
-        -do_write()
-    }
-    class Router {
-        +get(path, handler)
-        +post(path, handler)
-        +serve_static(mount, dir)
-        +use(middleware)
-        +route(req)
-    }
-    class ThreadPool {
-        +enqueue(task)
-        -workers_: vector<thread>
-    }
-    class Metrics {
-        +requests_per_sec
-        +total_requests
-        +active_connections
-    }
-
-    HttpServer *-- Router
-    HttpServer *-- ThreadPool
-    HttpServer *-- Metrics
-    HttpServer ..> Connection : creates
-    Connection o-- Router
-    Connection o-- ThreadPool
-    Connection o-- Metrics
-```
-
-### Request Flow
 ```mermaid
 sequenceDiagram
     participant Client
-    participant Acceptor
-    participant Connection
+    participant Acceptor as Acceptor (io_context)
+    participant Conn as Connection
+    participant Pool as Thread pool
     participant Router
-    participant Handler
 
-    Client->>Acceptor: TCP Connect
-    Acceptor->>Connection: Create & Start
-    Client->>Connection: HTTP Request
-    Connection->>Connection: Parse Request
-    Connection->>Router: route(Request)
-    Router->>Router: Match Route / Middleware
-    Router->>Handler: Execute Handler
-    Handler-->>Router: Response
-    Router-->>Connection: Response
-    Connection-->>Client: HTTP Response
-    Connection->>Connection: Close / Keep-Alive
+    Client->>Acceptor: TCP connect
+    Acceptor->>Conn: create & start
+    Client->>Conn: HTTP request (async_read)
+    Conn->>Pool: enqueue(process_request)
+    Pool->>Router: route(request)
+    Router-->>Pool: response
+    Pool->>Conn: post back to I/O executor
+    Conn-->>Client: HTTP response (async_write)
 ```
+
+| Component | Responsibility | Source |
+| --- | --- | --- |
+| `HttpServer` | Owns the `io_context`, acceptor, router, thread pool and metrics | [`src/server/http_server.cpp`](src/server/http_server.cpp) |
+| `Connection` | One per client: reads, parses, dispatches to the pool, writes back | [`src/server/connection.cpp`](src/server/connection.cpp) |
+| `Router` | Route matching, path parameters, middleware, static mounts | [`src/server/router.cpp`](src/server/router.cpp) |
+| `ThreadPool` | Fixed worker pool returning `std::future`s | [`include/core/thread_pool.hpp`](include/core/thread_pool.hpp) |
+| `Metrics` | Lock-free atomic counters read by the dashboard | [`include/server/metrics.hpp`](include/server/metrics.hpp) |
+
+Class diagram: [`asset/class-diagram.png`](asset/class-diagram.png)
+
+## Benchmarks
+
+Measured with ApacheBench (`ab`) against `GET /api/hello`, 20,000 requests, Release build, 4 worker threads.
+Machine: Apple M1 Pro (10 cores), macOS. Client and server on the same host.
+
+| Concurrency | Requests/sec | p95 latency | p99 latency | Failed |
+| ---: | ---: | ---: | ---: | ---: |
+| 10 | 24,157 | 1 ms | 1 ms | 0 |
+| 100 | 22,667 | 6 ms | 9 ms | 0 |
+
+Resident memory after the run was about 3 MB.
+
+Reproduce:
+
+```bash
+./build/bin/HighPerformanceHttpServer -c config/default.conf &
+ab -n 20000 -c 100 http://127.0.0.1:8080/api/hello
+```
+
+The [Benchmarks workflow](.github/workflows/benchmarks.yml) runs the same test on every push to `main`.
+
+## Design decisions
+
+- **I/O and work are separated.** The Asio thread only moves bytes; handlers run on the pool, and results are posted back to the connection's executor. A slow handler can't stall other connections' reads.
+- **Atomics for metrics.** Counters are `std::atomic` so worker threads update them without locks, and the dashboard reads them without blocking requests.
+- **Regex compiled once per route.** Paths like `/users/:id` are turned into a `std::regex` when the route is registered, not on every request.
+- **The router is a library.** Everything except `main.cpp` builds into `server_lib`, so tests and examples link the same code the server runs.
+
+## Roadmap
+
+- [ ] HTTP keep-alive (every request currently opens a new connection)
+- [ ] Decrement `active_connections` when a connection closes
+- [ ] Zero-copy static file serving with `sendfile`
+- [ ] Benchmark comparison against nginx on identical hardware
+- [ ] TLS support
+- [ ] HTTP/2
+
+## Project structure
 
 ```text
-┌─────────────────────────────────────────────────────┐
-│                   HTTP Server                       │
-├───────────────┬─────────────────────────────────────┤
-│  Connection   │    Worker Thread Pool (N CPUs)      │
-│   Acceptor    │  ┌─────┐ ┌─────┐ ┌─────┐ ┌─────┐    │
-│  (single      │  │Worker│ │Worker│ │Worker│ │ ... │    │
-│   thread)     │  └─────┘ └─────┘ └─────┘ └─────┘    │
-├───────────────┴─────────────────────────────────────┤
-│          Boost.Asio Proactor Pattern                │
-├─────────────────────────────────────────────────────┤
-│        Lock-free Request/Response Pool              │
-├─────────────────────────────────────────────────────┤
-│      HTTP Parser → Router → Middleware Chain        │
-└─────────────────────────────────────────────────────┘
+include/   Public headers (server, core, handlers, utils)
+src/       Implementation
+tests/     GoogleTest unit + integration tests, benchmark harness
+www/       Dashboard (HTML/CSS/JS)
+config/    Server and logging configuration
+scripts/   Build, benchmark and profiling helpers
+examples/  Minimal API and static-server examples
 ```
 
-## 🖥️ Web Dashboard
-The server includes a built-in real-time dashboard for monitoring and testing.
+## License
 
-- **Real-time Metrics**: View requests/sec, total requests, active connections, and bandwidth.
-- **API Tester**: Interactive tool to test API endpoints directly from the browser.
-- **Load Testing**: Mini-benchmark tool to simulate load and measure latency.
-
-Access the dashboard at `http://localhost:8080/` after starting the server.
-
-## ⚙️ Core Optimizations Implemented
-
-1. **Event-Driven Architecture**
-   - Non-blocking I/O with Boost.Asio proactor
-   - epoll/kqueue/IOCP backend abstraction
-   - Single acceptor thread minimizes contention
-
-2. **Memory Management**
-   - Custom arena allocators for request objects
-   - Object pooling for connections and buffers
-   - Zero-copy file transmission via sendfile/splice
-
-3. **Concurrency Design**
-   - Work-stealing thread pool for load balancing
-   - Lock-free queues for task distribution
-   - Thread-local caches for hot data paths
-
-4. **HTTP Protocol Optimizations**
-   - Pipelined request processing
-   - Header parsing with SIMD where available
-   - Connection keep-alive with smart timeouts
-
-## 📊 Performance Benchmarks
-
-*Benchmark Environment: AWS c5.4xlarge (16 vCPU, 32GB RAM)*
-
-### Throughput (requests/second)
-*Requests/sec (higher is better)*
-
-- **This Server**: 52,384 ▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓
-- **nginx**: 48,921 ▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓
-- **Go net/http**: 39,856 ▓▓▓▓▓▓▓▓▓▓▓▓▓▓
-- **Apache**: 35,210 ▓▓▓▓▓▓▓▓▓▓▓▓
-- **Node.js**: 28,447 ▓▓▓▓▓▓▓▓▓▓
-
-### Latency under load (lower is better)
-*p95 Latency (ms)*
-
-- **This Server**: 1.9ms ▓
-- **nginx**: 2.1ms ▓
-- **Go net/http**: 2.4ms ▓▓
-- **Apache**: 3.8ms ▓▓▓
-- **Node.js**: 4.2ms ▓▓▓▓
-
-### Memory footprint
-*Idle Memory Usage*
-
-- **This Server**: 12.4 MB ▓
-- **nginx**: 18.2 MB ▓▓
-- **Apache**: 32.1 MB ▓▓▓▓
-- **Node.js**: 45.6 MB ▓▓▓▓▓▓
-
-## � What I Learned
-
-- **Systems Programming**: Deep understanding of TCP stack, socket options, kernel bypass techniques
-- **Performance Engineering**: CPU profiling, cache optimization, lock-free programming
-- **C++ Modern Practices**: RAII, move semantics, template metaprogramming
-- **Production Readiness**: Load testing, memory leak detection, crash recovery
-
-## 🏆 Why This Matters
-
-This isn't just another "hello world" HTTP server. It's a production-optimized implementation that:
-
-- Outperforms popular production servers in specific scenarios
-- Demonstrates deep understanding of systems programming
-- Shows ability to profile, measure, and optimize
-- Implements real-world features (routing, middleware, static files)
-- Includes comprehensive testing and benchmarking
-
-## �🔬 Profiling & Analysis
-
-```bash
-# CPU profile (callgrind)
-valgrind --tool=callgrind ./build/bin/HighPerformanceHttpServer
-kcachegrind callgrind.out.*
-
-# Heap profiling
-valgrind --tool=massif ./build/bin/HighPerformanceHttpServer
-ms_print massif.out.*
-
-# Real-time metrics
-./build/bin/HighPerformanceHttpServer --metrics
-# Output: Requests/sec: 52384 | Active: 156 | Memory: 12.4MB
-```
-
-## 🚀 Quick Start
-
-```bash
-# Clone the repository
-git clone https://github.com/yourusername/http-server.git
-cd http-server
-
-# Build
-mkdir -p build && cd build
-cmake -DCMAKE_BUILD_TYPE=Release ..
-make -j$(nproc)
-
-# Run with default config
-./bin/HighPerformanceHttpServer
-
-# Run benchmarks & profiling
-../scripts/benchmark.sh
-../scripts/profile.sh
-```
-
-## 📊 Benchmark Comparison Script
-
-```bash
-# Compare with other servers
-./scripts/benchmark_all.sh
-
-# Results saved to benchmark_results/comparison_$(date).csv
-```
-
-## 🔜 Roadmap
-
-- [ ] HTTP/2 support with multiplexing
-- [ ] SSL/TLS integration
-- [ ] WebSocket support
-- [ ] Dynamic configuration reload
-- [ ] Distributed tracing integration
-- [ ] Kubernetes health checks
-
-## 🤝 Contributing
-
-Contributions are welcome! If you have ideas for optimizations:
-
-1. Run benchmarks to establish baseline
-2. Implement your change
-3. Run benchmarks again
-4. Submit PR with performance improvement data
-
-## 📂 Project Structure
-
-```
-http-server/
-├── include/        # Header files (Public API)
-├── src/            # Implementation files
-├── tests/          # Unit and integration tests
-├── scripts/        # Build and utility scripts
-├── config/         # Configuration files
-├── www/            # Web root for static files
-└── CMakeLists.txt  # Build configuration
-```
-
-## 📝 License
-
-MIT - feel free to use in your own projects
+[MIT](LICENSE)
